@@ -2,7 +2,6 @@
 import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import AppLayout from '../layouts/AppLayout.vue';
-import SystemSubnav from '../components/SystemSubnav.vue';
 import axios from 'axios';
 
 const props = defineProps({
@@ -61,7 +60,6 @@ onUnmounted(() => {
 <template>
     <AppLayout>
         <Head title="Live Gateway Console & Monitoring" />
-        <SystemSubnav />
 
         <div class="space-y-6">
             

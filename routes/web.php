@@ -96,6 +96,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/monitoring/test-api', [MonitoringController::class, 'testApi'])->name('monitoring.test-api');
     Route::get('/api/gateway/status', [MonitoringController::class, 'statusJson'])->name('api.gateway.status');
     Route::get('/api/gateway/logs', [MonitoringController::class, 'logsJson'])->name('api.gateway.logs');
+    Route::get('/api/logs', [SystemController::class, 'apiLogs'])->name('api.logs');
     Route::get('/logs', [SystemController::class, 'logs'])->name('logs.index');
     Route::get('/system', [SystemController::class, 'index'])->name('system.index');
     Route::get('/documentation', [DocController::class, 'index'])->name('docs.index');

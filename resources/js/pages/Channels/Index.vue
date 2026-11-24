@@ -2,7 +2,6 @@
 import { ref, computed } from 'vue';
 import { Head, router } from '@inertiajs/vue3';
 import AppLayout from '../../layouts/AppLayout.vue';
-import ConfigSubnav from '../../components/ConfigSubnav.vue';
 
 const props = defineProps({
     platforms: {
@@ -174,7 +173,6 @@ const getStateBadge = (state) => {
 
 <template>
     <AppLayout title="Channels & Messaging Platforms">
-        <ConfigSubnav />
         <div class="space-y-6">
             <!-- Header Card -->
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-2xl bg-white dark:bg-[#1e1e2d] border border-gray-200 dark:border-gray-800 shadow-xs">

@@ -2,7 +2,6 @@
 import { ref } from 'vue';
 import { Head, useForm } from '@inertiajs/vue3';
 import AppLayout from '../layouts/AppLayout.vue';
-import ConfigSubnav from '../components/ConfigSubnav.vue';
 import axios from 'axios';
 
 const props = defineProps({
@@ -73,7 +72,6 @@ const isObject = (val) => typeof val === 'object' && val !== null && !Array.isAr
 
 <template>
     <AppLayout title="Expressa Configuration">
-        <ConfigSubnav />
         <div class="space-y-6">
             <!-- Header -->
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

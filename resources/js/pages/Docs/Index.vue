@@ -1,12 +1,10 @@
 <script setup>
 import { Head } from '@inertiajs/vue3';
 import AppLayout from '../../layouts/AppLayout.vue';
-import SystemSubnav from '../../components/SystemSubnav.vue';
 </script>
 
 <template>
     <AppLayout title="Documentation & Guides">
-        <SystemSubnav />
         <div class="space-y-6">
             <!-- Header -->
             <div class="flex items-center justify-between p-5 rounded-2xl bg-white dark:bg-[#1e1e2d] border border-gray-200 dark:border-gray-800 shadow-xs">

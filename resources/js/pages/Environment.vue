@@ -2,7 +2,6 @@
 import { ref, computed } from 'vue';
 import { Head, useForm, router } from '@inertiajs/vue3';
 import AppLayout from '../layouts/AppLayout.vue';
-import ConfigSubnav from '../components/ConfigSubnav.vue';
 
 const props = defineProps({
     variables: {
@@ -81,7 +80,6 @@ const submitEdit = () => {
 
 <template>
     <AppLayout title="Environment Variables">
-        <ConfigSubnav />
         <div class="space-y-6">
             <!-- Header -->
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
