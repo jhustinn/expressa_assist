@@ -1574,17 +1574,126 @@ class HermesService
             }
         }
 
-        // 2. Load API Keys from hermes .env or environment
+        // 2. Resolve Agent Model from Database
+        $assignedModelKey = null;
+        try {
+            $agentProfile = \App\Models\AgentProfile::where('slug', $profile)->first();
+            if ($agentProfile && !empty($agentProfile->model_default)) {
+                $assignedModelKey = $agentProfile->model_default;
+            }
+        } catch (\Throwable $e) {}
+
+        if (!$assignedModelKey) {
+            $assignedModelKey = ($profile === 'jhustyn') ? 'qwen/qwen3.8-27b' : 'gemini-flash-lite-latest';
+        }
+
+        // Check if assignedModelKey is registered in global.ai_models
+        $modelRecord = null;
+        try {
+            $modelRecord = \App\Models\AiModel::where('model_key', $assignedModelKey)->first();
+        } catch (\Throwable $e) {}
+
+        $targetProvider = $modelRecord ? $modelRecord->provider : (str_contains($assignedModelKey, 'gemini') ? 'gemini' : 'groq');
+        $targetModelKey = $assignedModelKey;
+
+        // 3. Load API Keys from hermes .env or environment
         $envVars = $this->getEnvironmentVariables();
         $groqKey = $envVars['GROQ_API_KEY'] ?? env('GROQ_API_KEY', '');
         $geminiKey = $envVars['GOOGLE_API_KEY'] ?? $envVars['GEMINI_API_KEY'] ?? env('GOOGLE_API_KEY', '');
+        $openrouterKey = $envVars['OPENROUTER_API_KEY'] ?? env('OPENROUTER_API_KEY', '');
 
         $reply = null;
-        $usedModel = 'qwen/qwen3.8-27b';
-        $provider = 'groq';
+        $usedModel = $targetModelKey;
+        $provider = $targetProvider;
 
-        // 3. Try Groq Provider First (High Speed & Secure)
-        if (!empty($groqKey)) {
+        // 4. Try Primary Target Provider
+        if ($targetProvider === 'groq' && !empty($groqKey)) {
+            try {
+                $groqResponse = Http::withHeaders([
+                    'Authorization' => 'Bearer ' . $groqKey,
+                    'Content-Type' => 'application/json',
+                ])
+                ->timeout(25)
+                ->withoutVerifying()
+                ->post('https://api.groq.com/openai/v1/chat/completions', [
+                    'model' => $targetModelKey,
+                    'messages' => [
+                        ['role' => 'system', 'content' => $systemPrompt],
+                        ['role' => 'user', 'content' => $message],
+                    ],
+                    'temperature' => 0.6,
+                    'max_tokens' => 1500,
+                ]);
+
+                if ($groqResponse->successful()) {
+                    $reply = $groqResponse->json('choices.0.message.content');
+                    $usedModel = $targetModelKey;
+                    $provider = 'groq';
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Groq direct API call failed: ' . $e->getMessage());
+            }
+        } elseif ($targetProvider === 'gemini' && !empty($geminiKey)) {
+            try {
+                $cleanModel = str_replace('models/', '', $targetModelKey);
+                if ($cleanModel === 'gemini-flash-lite-latest') {
+                    $cleanModel = 'gemini-2.0-flash';
+                }
+                $geminiResponse = Http::timeout(25)
+                    ->withoutVerifying()
+                    ->post("https://generativelanguage.googleapis.com/v1beta/models/{$cleanModel}:generateContent?key={$geminiKey}", [
+                        'contents' => [
+                            [
+                                'role' => 'user',
+                                'parts' => [
+                                    ['text' => $systemPrompt . "\n\nPertanyaan User: " . $message]
+                                ]
+                            ]
+                        ],
+                        'generationConfig' => [
+                            'temperature' => 0.7,
+                            'maxOutputTokens' => 1500,
+                        ]
+                    ]);
+
+                if ($geminiResponse->successful()) {
+                    $reply = $geminiResponse->json('candidates.0.content.parts.0.text');
+                    $usedModel = $cleanModel;
+                    $provider = 'gemini';
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Gemini direct API call failed: ' . $e->getMessage());
+            }
+        } elseif ($targetProvider === 'openrouter' && !empty($openrouterKey)) {
+            try {
+                $orResponse = Http::withHeaders([
+                    'Authorization' => 'Bearer ' . $openrouterKey,
+                    'Content-Type' => 'application/json',
+                ])
+                ->timeout(30)
+                ->withoutVerifying()
+                ->post('https://openrouter.ai/api/v1/chat/completions', [
+                    'model' => $targetModelKey,
+                    'messages' => [
+                        ['role' => 'system', 'content' => $systemPrompt],
+                        ['role' => 'user', 'content' => $message],
+                    ],
+                    'temperature' => 0.6,
+                    'max_tokens' => 1500,
+                ]);
+
+                if ($orResponse->successful()) {
+                    $reply = $orResponse->json('choices.0.message.content');
+                    $usedModel = $targetModelKey;
+                    $provider = 'openrouter';
+                }
+            } catch (\Throwable $e) {
+                Log::warning('OpenRouter API call failed: ' . $e->getMessage());
+            }
+        }
+
+        // 5. Seamless Fallback to Groq or Gemini if Primary was not reached
+        if (empty($reply) && !empty($groqKey)) {
             try {
                 $groqResponse = Http::withHeaders([
                     'Authorization' => 'Bearer ' . $groqKey,
@@ -1604,15 +1713,14 @@ class HermesService
 
                 if ($groqResponse->successful()) {
                     $reply = $groqResponse->json('choices.0.message.content');
-                    $usedModel = 'qwen/qwen3.8-27b';
+                    $usedModel = 'qwen/qwen3.8-27b (fallback)';
                     $provider = 'groq';
                 }
             } catch (\Throwable $e) {
-                Log::warning('Groq direct API call failed: ' . $e->getMessage());
+                Log::warning('Groq fallback failed: ' . $e->getMessage());
             }
         }
 
-        // 4. Fallback to Gemini if Groq was not successful
         if (empty($reply) && !empty($geminiKey)) {
             try {
                 $geminiResponse = Http::timeout(25)
@@ -1634,11 +1742,11 @@ class HermesService
 
                 if ($geminiResponse->successful()) {
                     $reply = $geminiResponse->json('candidates.0.content.parts.0.text');
-                    $usedModel = 'gemini-2.5-pro';
+                    $usedModel = 'gemini-2.5-pro (fallback)';
                     $provider = 'gemini';
                 }
             } catch (\Throwable $e) {
-                Log::warning('Gemini direct API call failed: ' . $e->getMessage());
+                Log::warning('Gemini fallback failed: ' . $e->getMessage());
             }
         }
 

@@ -86,6 +86,11 @@ Route::middleware(['auth'])->group(function () {
 
     // 4. Models & Diagnostics
     Route::get('/models', [ModelController::class, 'index'])->name('models.index');
+    Route::post('/api/models/store', [ModelController::class, 'storeModel'])->name('models.store');
+    Route::put('/api/models/{id}', [ModelController::class, 'updateModel'])->name('models.update');
+    Route::delete('/api/models/{id}', [ModelController::class, 'deleteModel'])->name('models.delete');
+    Route::post('/api/models/assign-agent', [ModelController::class, 'assignAgentModel'])->name('models.assign-agent');
+    Route::post('/api/models/test', [ModelController::class, 'testModel'])->name('models.test');
     Route::post('/api/models/set', [ModelController::class, 'set'])->name('models.set');
     Route::get('/profiles', [ProfileController::class, 'index'])->name('profiles.index');
     Route::post('/profiles', [ProfileController::class, 'store'])->name('profiles.store');
