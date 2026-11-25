@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import { Head, useForm, router } from '@inertiajs/vue3';
 import AppLayout from '../layouts/AppLayout.vue';
+import axios from 'axios';
 
 const props = defineProps({
     commands: Array,
@@ -9,6 +10,77 @@ const props = defineProps({
     env: Object,
     profiles: Array,
 });
+
+// Simulator state
+const simSelectedUser = ref(props.users?.[0]?.telegram_id || '');
+const simCustomId = ref('');
+const simProfile = ref('jhustyn');
+const simMessage = ref('/jhustyn status');
+const simLoading = ref(false);
+const simLogs = ref([]);
+
+const runSimulate = async (customMsg = null) => {
+    const msgToSend = customMsg || simMessage.value;
+    if (!msgToSend) return;
+    const tgId = simCustomId.value || simSelectedUser.value;
+    if (!tgId) {
+        alert('Pilih atau masukkan Telegram ID terlebih dahulu!');
+        return;
+    }
+    simLoading.value = true;
+    try {
+        const res = await axios.post('/api/telegram/simulate', {
+            telegram_id: tgId,
+            message: msgToSend,
+            profile: simProfile.value,
+        });
+        simLogs.value.unshift({
+            time: new Date().toLocaleTimeString(),
+            telegram_id: tgId,
+            message: msgToSend,
+            status: res.data.status,
+            reply: res.data.reply,
+            user: res.data.user,
+            provider: res.data.provider,
+        });
+        if (!customMsg) simMessage.value = '';
+    } catch (err) {
+        simLogs.value.unshift({
+            time: new Date().toLocaleTimeString(),
+            telegram_id: tgId,
+            message: msgToSend,
+            status: 'error',
+            reply: err.response?.data?.message || err.message,
+        });
+    } finally {
+        simLoading.value = false;
+    }
+};
+
+// Broadcast state
+const showBroadcastModal = ref(false);
+const broadcastTargetRole = ref('all');
+const broadcastMessageText = ref('');
+const broadcastLoading = ref(false);
+const broadcastResult = ref(null);
+
+const sendBroadcast = async () => {
+    if (!broadcastMessageText.value) return;
+    broadcastLoading.value = true;
+    broadcastResult.value = null;
+    try {
+        const res = await axios.post('/api/telegram/broadcast', {
+            message: broadcastMessageText.value,
+            target_role: broadcastTargetRole.value,
+        });
+        broadcastResult.value = res.data;
+        broadcastMessageText.value = '';
+    } catch (err) {
+        alert('Gagal mengirim broadcast: ' + (err.response?.data?.message || err.message));
+    } finally {
+        broadcastLoading.value = false;
+    }
+};
 
 const tokenForm = useForm({
     telegram_bot_token: props.env?.TELEGRAM_BOT_TOKEN || '',
@@ -189,6 +261,190 @@ const getRoleBadge = (role) => {
                         <span class="font-mono font-bold text-sky-500">{{ env?.TELEGRAM_ALLOWED_USERS || 'Kosong' }}</span>
                     </div>
                 </form>
+            </div>
+
+            <!-- Interactive Telegram Bot Simulator & RBAC Tester -->
+            <div class="bg-white dark:bg-[#1e1e2d] border border-gray-200 dark:border-gray-800 rounded-2xl p-6 shadow-xs">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 mb-4 border-b border-gray-200 dark:border-gray-800">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center text-lg">
+                            <i class="fa-solid fa-gamepad"></i>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-base font-bold text-gray-900 dark:text-white">Telegram Bot Simulator & RBAC Inspector</h3>
+                                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                                    Safe Direct Engine
+                                </span>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">
+                                Simulasikan pengiriman pesan atau command Telegram dari perspektif ID pengguna manapun tanpa perlu membuka aplikasi Telegram.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <button
+                            @click="showBroadcastModal = true"
+                            class="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 flex items-center gap-2 transition"
+                        >
+                            <i class="fa-solid fa-bullhorn"></i>
+                            <span>Kirim Broadcast</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- Controls -->
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                                Identitas Pengirim (Simulasikan User)
+                            </label>
+                            <select
+                                v-model="simSelectedUser"
+                                class="w-full bg-gray-50 dark:bg-[#161622] border border-gray-300 dark:border-gray-700 rounded-xl px-3 py-2 text-xs font-mono text-gray-900 dark:text-white outline-none focus:border-[#435ebe]"
+                            >
+                                <option v-for="u in users" :key="u.id" :value="u.telegram_id">
+                                    {{ u.name }} ({{ u.telegram_id }}) - [{{ (u.role || '').toUpperCase() }}]
+                                </option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                                Atau ID Telegram Kustom (Uji Penolakan Non-Whitelist)
+                            </label>
+                            <input
+                                v-model="simCustomId"
+                                type="text"
+                                placeholder="Kosongkan jika pakai dropdown di atas"
+                                class="w-full bg-gray-50 dark:bg-[#161622] border border-gray-300 dark:border-gray-700 rounded-xl px-3 py-2 text-xs font-mono text-gray-900 dark:text-white outline-none focus:border-[#435ebe]"
+                            />
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                                Target Profile AI
+                            </label>
+                            <select
+                                v-model="simProfile"
+                                class="w-full bg-gray-50 dark:bg-[#161622] border border-gray-300 dark:border-gray-700 rounded-xl px-3 py-2 text-xs text-gray-900 dark:text-white outline-none focus:border-[#435ebe]"
+                            >
+                                <option v-for="p in profiles" :key="p.name" :value="p.name">
+                                    {{ p.name }} ({{ p.cwd || 'root' }})
+                                </option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                                Quick Test Commands
+                            </label>
+                            <div class="flex flex-wrap gap-1.5">
+                                <button
+                                    type="button"
+                                    @click="runSimulate('/status')"
+                                    class="px-2.5 py-1 rounded-lg text-[11px] font-mono bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
+                                >
+                                    /status
+                                </button>
+                                <button
+                                    type="button"
+                                    @click="runSimulate('/jhustyn')"
+                                    class="px-2.5 py-1 rounded-lg text-[11px] font-mono bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
+                                >
+                                    /jhustyn
+                                </button>
+                                <button
+                                    type="button"
+                                    @click="runSimulate('/stop')"
+                                    class="px-2.5 py-1 rounded-lg text-[11px] font-mono bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
+                                >
+                                    /stop
+                                </button>
+                                <button
+                                    type="button"
+                                    @click="runSimulate('Halo Expressa, jelaskan peranmu')"
+                                    class="px-2.5 py-1 rounded-lg text-[11px] font-mono bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
+                                >
+                                    Halo Expressa
+                                </button>
+                            </div>
+                        </div>
+
+                        <form @submit.prevent="runSimulate()" class="space-y-2">
+                            <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                                Pesan / Command
+                            </label>
+                            <div class="flex gap-2">
+                                <input
+                                    v-model="simMessage"
+                                    type="text"
+                                    placeholder="Contoh: /jhustyn status atau Halo"
+                                    class="flex-1 bg-gray-50 dark:bg-[#161622] border border-gray-300 dark:border-gray-700 rounded-xl px-3 py-2 text-xs font-mono text-gray-900 dark:text-white outline-none focus:border-[#435ebe]"
+                                />
+                                <button
+                                    type="submit"
+                                    :disabled="simLoading"
+                                    class="px-4 py-2 rounded-xl text-xs font-bold bg-[#435ebe] hover:bg-[#364b98] text-white flex items-center gap-1.5 transition disabled:opacity-50"
+                                >
+                                    <i :class="['fa-solid fa-paper-plane', simLoading ? 'animate-bounce' : '']"></i>
+                                    <span>Kirim</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Output Console -->
+                    <div class="lg:col-span-2 flex flex-col h-[320px] rounded-xl bg-[#0f131f] border border-gray-800 p-4 font-mono text-xs overflow-hidden">
+                        <div class="flex items-center justify-between pb-2 mb-2 border-b border-gray-800 text-gray-400 text-[11px]">
+                            <div class="flex items-center gap-2">
+                                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                                <span>Telegram Simulated Console</span>
+                            </div>
+                            <button
+                                v-if="simLogs.length"
+                                @click="simLogs = []"
+                                class="text-gray-500 hover:text-gray-300 transition"
+                            >
+                                Bersihkan
+                            </button>
+                        </div>
+
+                        <div class="flex-1 overflow-y-auto space-y-3 pr-1 text-gray-300">
+                            <div v-if="simLogs.length === 0" class="h-full flex flex-col items-center justify-center text-gray-600 text-center">
+                                <i class="fa-solid fa-terminal text-2xl mb-2"></i>
+                                <p>Belum ada simulasi interaksi.</p>
+                                <p class="text-[10px]">Pilih pengguna dan kirim command untuk menguji respons Telegram & filter RBAC.</p>
+                            </div>
+
+                            <div
+                                v-for="(log, idx) in simLogs"
+                                :key="idx"
+                                class="p-3 rounded-xl bg-[#141928] border border-gray-800/80 space-y-1.5"
+                            >
+                                <div class="flex items-center justify-between text-[10px] text-gray-400">
+                                    <span class="font-bold text-sky-400">ID: {{ log.telegram_id }}</span>
+                                    <span>{{ log.time }}</span>
+                                </div>
+                                <div class="text-amber-300 font-semibold">
+                                    &gt; {{ log.message }}
+                                </div>
+                                <div
+                                    :class="[
+                                        'p-2.5 rounded-lg text-xs whitespace-pre-wrap leading-relaxed',
+                                        log.status === 'rejected'
+                                            ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
+                                            : 'bg-gray-900/60 text-gray-200 border border-gray-800'
+                                    ]"
+                                >
+                                    {{ log.reply }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Whitelist & RBAC User Management Section -->
@@ -634,6 +890,71 @@ const getRoleBadge = (role) => {
                     </form>
                 </div>
             </div>
+
+        <!-- Broadcast Modal -->
+        <div v-if="showBroadcastModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+            <div class="bg-white dark:bg-[#1e1e2d] border border-gray-200 dark:border-gray-800 rounded-2xl w-full max-w-lg p-6 shadow-xl">
+                <div class="flex items-center justify-between pb-4 mb-4 border-b border-gray-200 dark:border-gray-800">
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                            <i class="fa-solid fa-bullhorn text-sm"></i>
+                        </div>
+                        <h4 class="text-sm font-bold text-gray-900 dark:text-white">Broadcast Notifikasi ke Pengguna Telegram</h4>
+                    </div>
+                    <button @click="showBroadcastModal = false" class="text-gray-400 hover:text-gray-600">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <form @submit.prevent="sendBroadcast" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Target Pengguna</label>
+                        <select
+                            v-model="broadcastTargetRole"
+                            class="w-full bg-gray-50 dark:bg-[#161622] border border-gray-300 dark:border-gray-700 rounded-xl px-3 py-2 text-xs text-gray-900 dark:text-white outline-none"
+                        >
+                            <option value="all">Semua Pengguna Terdaftar ({{ users.length }} users)</option>
+                            <option value="admin">Admin Saja</option>
+                            <option value="developer">Developer Saja</option>
+                            <option value="reviewer">Reviewer Saja</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Isi Pesan Broadcast</label>
+                        <textarea
+                            v-model="broadcastMessageText"
+                            rows="4"
+                            placeholder="Tulis pengumuman atau instruksi di sini..."
+                            class="w-full bg-gray-50 dark:bg-[#161622] border border-gray-300 dark:border-gray-700 rounded-xl px-3 py-2 text-xs text-gray-900 dark:text-white outline-none focus:border-[#435ebe]"
+                            required
+                        ></textarea>
+                    </div>
+
+                    <div v-if="broadcastResult" class="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs">
+                        Terkirim ke {{ broadcastResult.sent_count }} pengguna!
+                    </div>
+
+                    <div class="flex items-center justify-end gap-3 pt-2">
+                        <button
+                            type="button"
+                            @click="showBroadcastModal = false"
+                            class="px-4 py-2 rounded-xl text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+                        >
+                            Tutup
+                        </button>
+                        <button
+                            type="submit"
+                            :disabled="broadcastLoading"
+                            class="px-5 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-2"
+                        >
+                            <i :class="['fa-solid fa-paper-plane', broadcastLoading ? 'fa-spin' : '']"></i>
+                            <span>Kirim Sekarang</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
 
         </div>
     </AppLayout>

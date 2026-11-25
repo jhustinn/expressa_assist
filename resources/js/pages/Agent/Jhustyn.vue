@@ -22,7 +22,64 @@ const props = defineProps({
     },
 });
 
-const activeTab = ref('knowledge'); // 'knowledge', 'projects', 'users', 'markdown'
+// Playground state
+const playgroundMessages = ref([
+    {
+        role: 'assistant',
+        content: 'Halo! Saya adalah **Agent Jhustyn**, Autonomous AI Engineer untuk sistem **JPP-ERP** (PT Petrokimia Gresik).\n\nSaya menguasai arsitektur Express.js + Prisma ORM, mutasi data transaksi atomik, dan seluruh alur modul bisnis Sales/EBAP, Purchasing, Inventory, Finance, dan Approval Matrix. Apa yang ingin Anda diskusikan atau uji hari ini?',
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+]);
+const playgroundInput = ref('');
+const playgroundLoading = ref(false);
+const playgroundScrollRef = ref(null);
+
+const sendPlaygroundMessage = async (customPrompt = null) => {
+    const text = customPrompt || playgroundInput.value.trim();
+    if (!text || playgroundLoading.value) return;
+
+    playgroundMessages.value.push({
+        role: 'user',
+        content: text,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    });
+
+    if (!customPrompt) {
+        playgroundInput.value = '';
+    }
+    playgroundLoading.value = true;
+
+    try {
+        const res = await fetch('/api/chat/send', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+            },
+            body: JSON.stringify({
+                message: text,
+                profile: 'jhustyn',
+            })
+        });
+
+        const data = await res.json();
+        playgroundMessages.value.push({
+            role: 'assistant',
+            content: data.reply || 'Jhustyn tidak mengembalikan respon.',
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        });
+    } catch (e) {
+        playgroundMessages.value.push({
+            role: 'assistant',
+            content: 'Terjadi kesalahan sistem saat menghubungi Jhustyn: ' + e.message,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        });
+    } finally {
+        playgroundLoading.value = false;
+    }
+};
+
+const activeTab = ref('knowledge'); // 'knowledge', 'projects', 'users', 'markdown', 'playground'
 
 const form = useForm({
     role_title: props.agent.role_title || 'Lead Enterprise Architect & Senior AI Engineer',
@@ -303,7 +360,7 @@ const syncFromDisk = () => {
                 <button
                     @click="activeTab = 'markdown'"
                     :class="[
-                        'px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2',
+                        'px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer',
                         activeTab === 'markdown'
                             ? 'bg-[#435ebe] text-white shadow-sm'
                             : 'text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800/60 hover:text-gray-900 dark:hover:text-white'
@@ -311,6 +368,20 @@ const syncFromDisk = () => {
                 >
                     <i class="fa-solid fa-file-pen"></i>
                     <span>Editor Jhustyn.md</span>
+                </button>
+
+                <button
+                    @click="activeTab = 'playground'"
+                    :class="[
+                        'px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer',
+                        activeTab === 'playground'
+                            ? 'bg-[#435ebe] text-white shadow-sm'
+                            : 'text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800/60 hover:text-gray-900 dark:hover:text-white'
+                    ]"
+                >
+                    <i class="fa-solid fa-flask-vial"></i>
+                    <span>Test & Playground Jhustyn</span>
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                 </button>
             </div>
 
@@ -791,6 +862,158 @@ const syncFromDisk = () => {
                             <i v-else class="fa-solid fa-floppy-disk"></i>
                             <span>Simpan ke File & Database</span>
                         </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ============================================================ -->
+            <!-- TAB 5: TEST & PLAYGROUND JHUSTYN (LIVE DRY-RUN)             -->
+            <!-- ============================================================ -->
+            <div v-if="activeTab === 'playground'" class="space-y-4">
+                <div class="rounded-3xl bg-white dark:bg-[#111726] border border-gray-200 dark:border-[#1a2337] p-6 shadow-xs space-y-5">
+                    <!-- Playground Header -->
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-gray-100 dark:border-gray-800/80">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-2xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center font-bold text-lg">
+                                <i class="fa-solid fa-user-astronaut"></i>
+                            </div>
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <h3 class="font-extrabold text-sm text-gray-900 dark:text-white">
+                                        Interactive Jhustyn Playground
+                                    </h3>
+                                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center gap-1">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                        Direct Safe API
+                                    </span>
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                    Uji respon, kepatuhan spesifikasi, dan pengetahuan Jhustyn terhadap ERP JPP secara langsung.
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Context Chips -->
+                        <div class="flex items-center gap-2 flex-wrap text-[11px] font-mono">
+                            <span class="px-2.5 py-1 rounded-xl bg-gray-100 dark:bg-[#151b2e] text-gray-700 dark:text-slate-300 border border-gray-200 dark:border-gray-800">
+                                <i class="fa-solid fa-folder text-amber-400 mr-1"></i> E:\App\SWA\JPP-ERP
+                            </span>
+                            <span class="px-2.5 py-1 rounded-xl bg-gray-100 dark:bg-[#151b2e] text-gray-700 dark:text-slate-300 border border-gray-200 dark:border-gray-800">
+                                <i class="fa-solid fa-shield text-emerald-400 mr-1"></i> ACID Transactions
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Quick Prompt Suggestions -->
+                    <div class="space-y-1.5">
+                        <div class="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                            Pintasan Pengujian Cepat:
+                        </div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <button
+                                type="button"
+                                @click="sendPlaygroundMessage('Jelaskan arsitektur backend ERP JPP dan aturan prisma.$transaction.')"
+                                :disabled="playgroundLoading"
+                                class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-gray-100 hover:bg-gray-200 dark:bg-[#151b2e] dark:hover:bg-slate-800 text-gray-700 dark:text-slate-300 border border-gray-200 dark:border-gray-800 transition cursor-pointer"
+                            >
+                                ⚡ Arsitektur Prisma & Transaksi
+                            </button>
+                            <button
+                                type="button"
+                                @click="sendPlaygroundMessage('Bagaimana alur dan validasi modul Sales & Distribution (Tender / EBAP)?')"
+                                :disabled="playgroundLoading"
+                                class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-gray-100 hover:bg-gray-200 dark:bg-[#151b2e] dark:hover:bg-slate-800 text-gray-700 dark:text-slate-300 border border-gray-200 dark:border-gray-800 transition cursor-pointer"
+                            >
+                                📋 Alur Sales & EBAP
+                            </button>
+                            <button
+                                type="button"
+                                @click="sendPlaygroundMessage('Sebutkan seluruh tanggung jawab path direktori proyek yang kamu kuasai.')"
+                                :disabled="playgroundLoading"
+                                class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-gray-100 hover:bg-gray-200 dark:bg-[#151b2e] dark:hover:bg-slate-800 text-gray-700 dark:text-slate-300 border border-gray-200 dark:border-gray-800 transition cursor-pointer"
+                            >
+                                📂 Tanggung Jawab Path
+                            </button>
+                            <button
+                                type="button"
+                                @click="sendPlaygroundMessage('Buatkan contoh kode safe transaction saat approval faktur dan mutasi stok.')"
+                                :disabled="playgroundLoading"
+                                class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-gray-100 hover:bg-gray-200 dark:bg-[#151b2e] dark:hover:bg-slate-800 text-gray-700 dark:text-slate-300 border border-gray-200 dark:border-gray-800 transition cursor-pointer"
+                            >
+                                🛡️ Contoh Safe Mutation
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Conversation Window -->
+                    <div class="rounded-2xl border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-[#0c101b] p-4 flex flex-col h-[450px]">
+                        <div class="flex-1 overflow-y-auto space-y-3.5 pr-2 select-text" ref="playgroundScrollRef">
+                            <div
+                                v-for="(msg, idx) in playgroundMessages"
+                                :key="idx"
+                                :class="[
+                                    'flex gap-3 text-xs',
+                                    msg.role === 'user' ? 'justify-end' : 'justify-start'
+                                ]"
+                            >
+                                <!-- Jhustyn Avatar -->
+                                <div
+                                    v-if="msg.role !== 'user'"
+                                    class="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-sm"
+                                >
+                                    <i class="fa-solid fa-user-astronaut"></i>
+                                </div>
+
+                                <!-- Bubble Content -->
+                                <div
+                                    :class="[
+                                        'max-w-[85%] rounded-2xl p-4 leading-relaxed whitespace-pre-wrap select-text shadow-xs',
+                                        msg.role === 'user'
+                                            ? 'bg-[#435ebe] text-white rounded-tr-none'
+                                            : 'bg-white dark:bg-[#151b2e] border border-gray-200 dark:border-gray-800 text-gray-900 dark:text-slate-100 rounded-tl-none font-sans'
+                                    ]"
+                                >
+                                    <div class="flex items-center justify-between gap-4 mb-1 border-b pb-1 text-[10px]" :class="msg.role === 'user' ? 'border-white/20 text-white/80' : 'border-gray-100 dark:border-gray-800 text-gray-400'">
+                                        <span class="font-bold">{{ msg.role === 'user' ? 'Anda (Tester)' : 'Agent Jhustyn' }}</span>
+                                        <span>{{ msg.time }}</span>
+                                    </div>
+                                    <div class="text-xs leading-relaxed">
+                                        {{ msg.content }}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Loading indicator -->
+                            <div v-if="playgroundLoading" class="flex gap-3 justify-start text-xs items-center">
+                                <div class="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xs shadow-xs animate-pulse">
+                                    <i class="fa-solid fa-user-astronaut"></i>
+                                </div>
+                                <div class="bg-white dark:bg-[#151b2e] border border-gray-200 dark:border-gray-800 rounded-2xl px-4 py-2.5 text-gray-500 dark:text-gray-400 flex items-center gap-2 shadow-xs">
+                                    <i class="fa-solid fa-spinner animate-spin text-[#435ebe] text-xs"></i>
+                                    <span>Jhustyn sedang menganalisis konteks JPP-ERP...</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Playground Input -->
+                        <div class="pt-3 border-t border-gray-200 dark:border-gray-800 flex items-center gap-2">
+                            <input
+                                v-model="playgroundInput"
+                                @keydown.enter.prevent="sendPlaygroundMessage()"
+                                :disabled="playgroundLoading"
+                                type="text"
+                                placeholder="Ketik pertanyaan atau instruksi untuk Jhustyn... (tekan Enter)"
+                                class="flex-1 px-4 py-2.5 rounded-xl text-xs bg-white dark:bg-[#151b2e] border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-[#435ebe]"
+                            />
+                            <button
+                                @click="sendPlaygroundMessage()"
+                                :disabled="playgroundLoading || !playgroundInput.trim()"
+                                class="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#435ebe] hover:bg-[#354bb4] text-white transition disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                            >
+                                <i :class="['fa-solid text-xs', playgroundLoading ? 'fa-spinner fa-spin' : 'fa-paper-plane']"></i>
+                                <span>Kirim</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

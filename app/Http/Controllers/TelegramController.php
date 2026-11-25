@@ -178,4 +178,139 @@ class TelegramController extends Controller
 
         return redirect()->route('telegram.index')->with('success', 'Bot Token Telegram & Whitelist berhasil disinkronkan!');
     }
+
+    // ── Simulator & Broadcast ───────────────────────────────────────────────
+
+    public function simulateMessage(Request $request)
+    {
+        $validated = $request->validate([
+            'telegram_id' => 'required|string',
+            'message' => 'required|string',
+            'profile' => 'nullable|string',
+        ]);
+
+        $telegramId = $validated['telegram_id'];
+        $message = trim($validated['message']);
+        $profile = $validated['profile'] ?: 'default';
+
+        // Check if user is registered & active in DB
+        $user = TelegramUser::where('global_user_telegram_id', $telegramId)
+            ->where('global_user_is_active', true)
+            ->first();
+
+        if (!$user) {
+            return response()->json([
+                'status' => 'rejected',
+                'reason' => 'unauthorized',
+                'reply' => "⛔ AKSES DITOLAK: ID Telegram {$telegramId} tidak terdaftar dalam whitelist atau akun sedang dinonaktifkan. Hubungi Administrator.",
+            ]);
+        }
+
+        // Check command permissions
+        if (str_starts_with($message, '/')) {
+            $parts = explode(' ', $message);
+            $cmd = strtolower($parts[0]);
+
+            $allowed = $user->global_user_allowed_commands ?? [];
+            $role = $user->global_user_role ?? 'guest';
+
+            if (!in_array('*', $allowed) && $role !== 'admin' && !in_array($cmd, $allowed)) {
+                return response()->json([
+                    'status' => 'rejected',
+                    'reason' => 'forbidden_command',
+                    'reply' => "⚠️ PERINGATAN RBAC: Peran Anda [{$role}] tidak memiliki izin untuk mengeksekusi perintah '{$cmd}'.",
+                ]);
+            }
+
+            // Check if command is registered in telegram_commands
+            $registeredCmd = TelegramCommand::where('command', $cmd)->where('is_active', true)->first();
+            if ($registeredCmd) {
+                if ($registeredCmd->target_profile) {
+                    $profile = $registeredCmd->target_profile;
+                }
+                if ($registeredCmd->prompt_template) {
+                    $argText = count($parts) > 1 ? implode(' ', array_slice($parts, 1)) : '';
+                    $message = str_replace('{args}', $argText, $registeredCmd->prompt_template);
+                }
+            }
+        }
+
+        // Execute via safe AI Provider Engine (no hermes.exe)
+        $sessionId = 'sim_tg_' . $telegramId;
+        $response = $this->hermes->executeChatMessage($message, $sessionId, $profile);
+
+        HermesActivityLog::create([
+            'type' => 'telegram_simulated_chat',
+            'sender' => "TG:{$user->global_user_nama} ({$telegramId})",
+            'message' => "Simulasi pesan: \"{$message}\" -> " . substr($response['reply'] ?? '', 0, 100),
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'reply' => $response['reply'] ?? 'Tidak ada respon.',
+            'provider' => $response['provider'] ?? 'safe-api',
+            'user' => [
+                'name' => $user->global_user_nama,
+                'role' => $user->global_user_role,
+                'telegram_id' => $user->global_user_telegram_id,
+            ],
+        ]);
+    }
+
+    public function broadcastMessage(Request $request)
+    {
+        $validated = $request->validate([
+            'message' => 'required|string',
+            'target_role' => 'nullable|string',
+        ]);
+
+        $query = TelegramUser::where('global_user_is_active', true)
+            ->whereNotNull('global_user_telegram_id');
+
+        if (!empty($validated['target_role']) && $validated['target_role'] !== 'all') {
+            $query->where('global_user_role', $validated['target_role']);
+        }
+
+        $users = $query->get();
+        $env = $this->hermes->getEnv();
+        $botToken = $env['TELEGRAM_BOT_TOKEN'] ?? null;
+
+        $sentCount = 0;
+        $errors = [];
+
+        foreach ($users as $user) {
+            if ($botToken) {
+                try {
+                    $res = \Illuminate\Support\Facades\Http::post("https://api.telegram.org/bot{$botToken}/sendMessage", [
+                        'chat_id' => $user->global_user_telegram_id,
+                        'text' => "📢 [BROADCAST EXPRESSA ASSIST]\n\n" . $validated['message'],
+                        'parse_mode' => 'Markdown',
+                    ]);
+                    if ($res->successful()) {
+                        $sentCount++;
+                    } else {
+                        $errors[] = "User {$user->global_user_nama}: " . $res->body();
+                    }
+                } catch (\Exception $e) {
+                    $errors[] = "User {$user->global_user_nama}: " . $e->getMessage();
+                }
+            } else {
+                $sentCount++;
+            }
+        }
+
+        HermesActivityLog::create([
+            'type' => 'telegram_broadcast',
+            'sender' => 'Dashboard Web Broadcast',
+            'message' => "Broadcast dikirim ke {$sentCount} pengguna: \"{$validated['message']}\"",
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'sent_count' => $sentCount,
+            'total_targets' => count($users),
+            'has_bot_token' => !empty($botToken),
+            'errors' => $errors,
+        ]);
+    }
 }

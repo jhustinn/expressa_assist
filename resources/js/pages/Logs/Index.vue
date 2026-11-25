@@ -309,6 +309,16 @@ onUnmounted(() => {
                         <span>Port 9119</span>
                     </a>
 
+                    <!-- Download Raw Log File -->
+                    <a
+                        :href="`/api/files/download?path=${encodeURIComponent('logs/' + selectedFile)}`"
+                        class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-sky-500/10 hover:bg-sky-500/20 text-sky-500 border border-sky-500/20 transition-colors inline-flex items-center gap-1.5"
+                        title="Unduh file log mentah saat ini"
+                    >
+                        <i class="fa-solid fa-download text-[10px]"></i>
+                        <span>Unduh Log</span>
+                    </a>
+
                     <!-- Live Auto-Refresh Toggle -->
                     <button
                         type="button"

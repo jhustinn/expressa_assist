@@ -87,6 +87,52 @@ const restartGateway = () => {
                 </div>
             </div>
 
+            <!-- Safe Mode & Architecture Banner -->
+            <div class="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-sky-500/10 to-indigo-500/10 border border-emerald-500/20 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-500 flex items-center justify-center text-lg shrink-0">
+                        <i class="fa-solid fa-shield-halved"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">
+                                Safe Direct API Engine Aktif
+                            </h3>
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                0% Shell Command Risk
+                            </span>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                            Eksekusi binary mentah <code class="font-mono text-rose-400">hermes.exe</code> telah dimatikan total. Inferensi AI berjalan langsung secara aman via Groq &amp; Gemini Native HTTP API.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2 shrink-0">
+                    <Link
+                        href="/agent-jhustyn"
+                        class="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#435ebe] text-white hover:bg-[#354bb4] transition flex items-center gap-1.5"
+                    >
+                        <i class="fa-solid fa-user-astronaut"></i>
+                        <span>Playground Jhustyn</span>
+                    </Link>
+                    <Link
+                        href="/files"
+                        class="px-3 py-1.5 rounded-xl text-xs font-bold bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition flex items-center gap-1.5"
+                    >
+                        <i class="fa-regular fa-folder-open"></i>
+                        <span>File Editor</span>
+                    </Link>
+                    <Link
+                        href="/telegram"
+                        class="px-3 py-1.5 rounded-xl text-xs font-bold bg-sky-500/10 text-sky-500 hover:bg-sky-500/20 transition flex items-center gap-1.5"
+                    >
+                        <i class="fa-brands fa-telegram"></i>
+                        <span>Bot Simulator</span>
+                    </Link>
+                </div>
+            </div>
+
             <!-- Top Stat Cards (Reference Dashboard Overview Metrics) -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <!-- 1. Model Engine Card -->

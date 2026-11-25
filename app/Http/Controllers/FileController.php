@@ -190,6 +190,137 @@ class FileController extends Controller
         return response()->download($path);
     }
 
+    /**
+     * Save edited file content safely
+     */
+    public function saveFile(Request $request)
+    {
+        $validated = $request->validate([
+            'path' => 'required|string',
+            'content' => 'required|string',
+        ]);
+
+        $path = $validated['path'];
+
+        if (!File::exists($path) || File::isDirectory($path)) {
+            return response()->json(['success' => false, 'message' => 'Berkas tujuan tidak valid atau tidak ditemukan.'], 404);
+        }
+
+        // Prevent modification of dangerous root files
+        $lowerPath = strtolower($path);
+        if (str_contains($lowerPath, '\\windows\\') || str_contains($lowerPath, '\\system32\\')) {
+            return response()->json(['success' => false, 'message' => 'Akses ditolak: berkas sistem operasi dilindungi.'], 403);
+        }
+
+        try {
+            File::put($path, $validated['content']);
+
+            \App\Models\GlobalActivityLog::create([
+                'global_activity_action' => 'file_edit',
+                'global_activity_description' => 'Menyimpan perubahan berkas: ' . basename($path) . " ({$path})",
+                'global_activity_status' => 'success',
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Berkas ' . basename($path) . ' berhasil disimpan!',
+                'last_modified' => date('Y-m-d H:i:s', File::lastModified($path)),
+                'size' => $this->formatBytes(File::size($path)),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => 'Gagal menyimpan berkas: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Create new file or folder
+     */
+    public function createItem(Request $request)
+    {
+        $validated = $request->validate([
+            'parent_path' => 'required|string',
+            'name' => 'required|string|max:100',
+            'type' => 'required|in:file,folder',
+        ]);
+
+        $parent = rtrim($validated['parent_path'], '\\');
+        $cleanName = trim(preg_replace('/[\\/\\\\:*?"<>|]/', '', $validated['name']));
+        if (empty($cleanName)) {
+            return redirect()->back()->with('error', 'Nama berkas/folder tidak valid.');
+        }
+
+        $targetPath = $parent . DIRECTORY_SEPARATOR . $cleanName;
+
+        if (File::exists($targetPath)) {
+            return redirect()->back()->with('error', "Item dengan nama '{$cleanName}' sudah ada.");
+        }
+
+        try {
+            if ($validated['type'] === 'folder') {
+                File::makeDirectory($targetPath, 0755, true);
+                $msg = "Folder '{$cleanName}' berhasil dibuat.";
+            } else {
+                File::put($targetPath, "# {$cleanName}\n\n");
+                $msg = "Berkas '{$cleanName}' berhasil dibuat.";
+            }
+
+            \App\Models\GlobalActivityLog::create([
+                'global_activity_action' => 'file_create',
+                'global_activity_description' => "Membuat {$validated['type']}: {$cleanName} di {$parent}",
+                'global_activity_status' => 'success',
+            ]);
+
+            return redirect()->route('files.index', ['path' => $parent])->with('success', $msg);
+        } catch (\Throwable $e) {
+            return redirect()->back()->with('error', 'Gagal membuat item: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Delete file or folder
+     */
+    public function deleteItem(Request $request)
+    {
+        $validated = $request->validate([
+            'path' => 'required|string',
+        ]);
+
+        $path = $validated['path'];
+
+        if (!File::exists($path)) {
+            return redirect()->back()->with('error', 'Berkas atau folder tidak ditemukan.');
+        }
+
+        // Safety: Do not allow deleting root drives or core directories
+        $clean = rtrim($path, '\\');
+        if (strlen($clean) <= 3 || strtolower($clean) === 'e:\\hermes' || strtolower($clean) === strtolower(base_path())) {
+            return redirect()->back()->with('error', 'Aksi ditolak: Direktori root sistem tidak boleh dihapus.');
+        }
+
+        $parent = dirname($path);
+        $name = basename($path);
+
+        try {
+            if (File::isDirectory($path)) {
+                File::deleteDirectory($path);
+                $msg = "Folder '{$name}' berhasil dihapus.";
+            } else {
+                File::delete($path);
+                $msg = "Berkas '{$name}' berhasil dihapus.";
+            }
+
+            \App\Models\GlobalActivityLog::create([
+                'global_activity_action' => 'file_delete',
+                'global_activity_description' => "Menghapus {$name} dari {$path}",
+                'global_activity_status' => 'success',
+            ]);
+
+            return redirect()->route('files.index', ['path' => $parent])->with('success', $msg);
+        } catch (\Throwable $e) {
+            return redirect()->back()->with('error', 'Gagal menghapus item: ' . $e->getMessage());
+        }
+    }
+
     private function buildBreadcrumbs(string $path): array
     {
         $parts = explode('\\', rtrim($path, '\\'));

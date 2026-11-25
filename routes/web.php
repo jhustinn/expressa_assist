@@ -48,6 +48,9 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/files', [FileController::class, 'index'])->name('files.index');
     Route::get('/api/files/read', [FileController::class, 'readFile'])->name('files.read');
     Route::get('/api/files/download', [FileController::class, 'download'])->name('files.download');
+    Route::post('/api/files/save', [FileController::class, 'saveFile'])->name('files.save');
+    Route::post('/api/files/create', [FileController::class, 'createItem'])->name('files.create');
+    Route::post('/api/files/delete', [FileController::class, 'deleteItem'])->name('files.delete');
 
     // 2. Intelligence & Tools
     Route::get('/skills', [SkillController::class, 'index'])->name('skills.index');
@@ -146,6 +149,8 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/telegram/commands', [TelegramController::class, 'storeCommand'])->name('telegram.commands.store');
         Route::put('/telegram/commands/{id}', [TelegramController::class, 'updateCommand'])->name('telegram.commands.update');
         Route::delete('/telegram/commands/{id}', [TelegramController::class, 'destroyCommand'])->name('telegram.commands.destroy');
+        Route::post('/api/telegram/simulate', [TelegramController::class, 'simulateMessage'])->name('api.telegram.simulate');
+        Route::post('/api/telegram/broadcast', [TelegramController::class, 'broadcastMessage'])->name('api.telegram.broadcast');
 
         // Device Pairing
         Route::get('/pairing', [PairingController::class, 'index'])->name('pairing.index');

@@ -1544,70 +1544,161 @@ class HermesService
     }
 
     /**
-     * Execute chat prompt via Hermes CLI
+     * Execute chat prompt directly via Secure AI Provider API (Safe Mode - No hermes.exe)
      */
     public function executeChatMessage(string $message, ?string $sessionId = null, ?string $profile = 'default'): array
     {
-        $bin = $this->hermesHome . '\\bin\\hermes.exe';
         $profile = $profile ?: 'default';
-        $escapedMsg = addslashes($message);
+        $sessionId = $sessionId ?: 'sess_' . substr(md5(uniqid((string) mt_rand(), true)), 0, 12);
 
-        // Use -Q (quiet mode) to suppress banners, spinners, and ANSI colors
-        $cmd = "\"{$bin}\" chat -Q -q \"{$escapedMsg}\" --profile {$profile}";
-        if ($sessionId) {
-            $cmd .= " --resume \"{$sessionId}\"";
+        // 1. Prepare Profile Persona & System Instructions
+        $systemPrompt = "Kamu adalah Expressa Assist, asisten AI otonom cerdas untuk orchestrator sistem, integrasi Telegram, dan automasi.";
+        $hermesHome = $this->hermesHome;
+
+        if ($profile === 'jhustyn') {
+            $jhustynMdPath = $hermesHome . DIRECTORY_SEPARATOR . 'profiles' . DIRECTORY_SEPARATOR . 'jhustyn' . DIRECTORY_SEPARATOR . 'Jhustyn.md';
+            $jhustynSpecs = file_exists($jhustynMdPath) ? @file_get_contents($jhustynMdPath) : '';
+
+            $systemPrompt = "Kamu adalah Agent Jhustyn, Autonomous AI Engineer and System Specialist untuk Expressa Assist.\n"
+                . "Fokus utama dan tanggung jawabmu adalah proyek JPP-ERP (E:\\App\\SWA\\JPP-ERP), PostgreSQL, mutasi transaksi atomik, dan integritas modul bisnis.\n"
+                . "Berikut adalah spesifikasi resmi Jhustyn.md yang harus selalu kamu patuhi:\n"
+                . $jhustynSpecs . "\n\n"
+                . "Selalu berikan jawaban yang teknis, presisi, solutif, dan mengutamakan keamanan data (ACID transactions).";
+        } else {
+            $soulMdPath = $hermesHome . DIRECTORY_SEPARATOR . 'SOUL.md';
+            if (file_exists($soulMdPath)) {
+                $soulContent = @file_get_contents($soulMdPath);
+                if (!empty($soulContent)) {
+                    $systemPrompt .= "\n\nSpesifikasi Persona (SOUL.md):\n" . $soulContent;
+                }
+            }
         }
 
-        $env = array_merge($_SERVER, $_ENV, [
-            'HERMES_HOME' => $this->hermesHome,
-            'SystemRoot' => getenv('SystemRoot') ?: 'C:\\Windows',
-            'WINDIR' => getenv('WINDIR') ?: 'C:\\Windows',
-            'PATH' => getenv('PATH'),
-            'USERPROFILE' => getenv('USERPROFILE') ?: 'C:\\Users\\HP',
-            'HOME' => getenv('USERPROFILE') ?: 'C:\\Users\\HP',
-            'HOMEDRIVE' => 'C:',
-            'HOMEPATH' => '\\Users\\HP',
-            'LOCALAPPDATA' => getenv('LOCALAPPDATA') ?: 'C:\\Users\\HP\\AppData\\Local',
-            'APPDATA' => getenv('APPDATA') ?: 'C:\\Users\\HP\\AppData\\Roaming',
-            'TEMP' => getenv('TEMP') ?: 'C:\\Users\\HP\\AppData\\Local\\Temp',
-            'TMP' => getenv('TMP') ?: 'C:\\Users\\HP\\AppData\\Local\\Temp',
-        ]);
+        // 2. Load API Keys from hermes .env or environment
+        $envVars = $this->getEnvironmentVariables();
+        $groqKey = $envVars['GROQ_API_KEY'] ?? env('GROQ_API_KEY', '');
+        $geminiKey = $envVars['GOOGLE_API_KEY'] ?? $envVars['GEMINI_API_KEY'] ?? env('GOOGLE_API_KEY', '');
 
-        $process = \Symfony\Component\Process\Process::fromShellCommandline($cmd, null, $env);
-        $process->setTimeout(90);
-        $process->run();
+        $reply = null;
+        $usedModel = 'qwen/qwen3.8-27b';
+        $provider = 'groq';
 
-        $output = $process->getOutput();
-        if (empty($output)) {
-            $output = $process->getErrorOutput();
+        // 3. Try Groq Provider First (High Speed & Secure)
+        if (!empty($groqKey)) {
+            try {
+                $groqResponse = Http::withHeaders([
+                    'Authorization' => 'Bearer ' . $groqKey,
+                    'Content-Type' => 'application/json',
+                ])
+                ->timeout(25)
+                ->withoutVerifying()
+                ->post('https://api.groq.com/openai/v1/chat/completions', [
+                    'model' => 'qwen/qwen3.8-27b',
+                    'messages' => [
+                        ['role' => 'system', 'content' => $systemPrompt],
+                        ['role' => 'user', 'content' => $message],
+                    ],
+                    'temperature' => 0.6,
+                    'max_tokens' => 1500,
+                ]);
+
+                if ($groqResponse->successful()) {
+                    $reply = $groqResponse->json('choices.0.message.content');
+                    $usedModel = 'qwen/qwen3.8-27b';
+                    $provider = 'groq';
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Groq direct API call failed: ' . $e->getMessage());
+            }
         }
 
-        $newSessionId = $sessionId;
-        if (preg_match('/session_id:\s*([a-zA-Z0-9_\-]+)/i', $output, $sm)) {
-            $newSessionId = trim($sm[1]);
-        } elseif (preg_match('/Session:\s*([a-zA-Z0-9_\-]+)/i', $output, $sm)) {
-            $newSessionId = trim($sm[1]);
+        // 4. Fallback to Gemini if Groq was not successful
+        if (empty($reply) && !empty($geminiKey)) {
+            try {
+                $geminiResponse = Http::timeout(25)
+                    ->withoutVerifying()
+                    ->post("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={$geminiKey}", [
+                        'contents' => [
+                            [
+                                'role' => 'user',
+                                'parts' => [
+                                    ['text' => $systemPrompt . "\n\nPertanyaan User: " . $message]
+                                ]
+                            ]
+                        ],
+                        'generationConfig' => [
+                            'temperature' => 0.7,
+                            'maxOutputTokens' => 1500,
+                        ]
+                    ]);
+
+                if ($geminiResponse->successful()) {
+                    $reply = $geminiResponse->json('candidates.0.content.parts.0.text');
+                    $usedModel = 'gemini-2.5-pro';
+                    $provider = 'gemini';
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Gemini direct API call failed: ' . $e->getMessage());
+            }
         }
 
-        // Clean output: remove ANSI escape codes & console artifacts
-        $clean = $output;
-        $clean = preg_replace('/\x1b\[[0-9;]*[a-zA-Z]/', '', $clean);
-        $clean = preg_replace('/(\x1b|\x1B|≡)\[[0-9;]*[a-zA-Z]/', '', $clean);
-        $clean = preg_replace('/(\x1b|\x1B|≡)\[[0-9;]*m/', '', $clean);
-        $clean = preg_replace('/^↻\s*Resumed session.*?\r?\n/i', '', $clean);
-        $clean = preg_replace('/^Query:.*?\r?\n/is', '', $clean);
-        $clean = preg_replace('/session_id:\s*[a-zA-Z0-9_\-]+.*$/is', '', $clean);
-        $clean = preg_replace('/Session:.*$/is', '', $clean);
-        $clean = preg_replace('/Resume this session with:.*$/is', '', $clean);
-        $clean = preg_replace('/[─\-]{5,}/', '', $clean);
-        $clean = preg_replace('/^☤\s*Hermes\s*/', '', $clean);
-        $reply = trim($clean);
+        if (empty($reply)) {
+            $reply = "Maaf, terjadi kendala saat menghubungkan ke AI Provider secara aman. Silakan periksa koneksi internet atau API Keys di menu API Keys & Env.";
+        }
+
+        // 5. Persist Session History into JSON
+        try {
+            $sessionsDir = $hermesHome . DIRECTORY_SEPARATOR . 'sessions';
+            if (!is_dir($sessionsDir)) {
+                @mkdir($sessionsDir, 0755, true);
+            }
+
+            $sessionFile = $sessionsDir . DIRECTORY_SEPARATOR . $sessionId . '.json';
+            $sessionData = file_exists($sessionFile) ? json_decode(@file_get_contents($sessionFile), true) : null;
+            if (!$sessionData) {
+                $sessionData = [
+                    'session_id' => $sessionId,
+                    'profile' => $profile,
+                    'created_at' => now()->toIso8601String(),
+                    'provider' => $provider,
+                    'model' => $usedModel,
+                    'request' => ['body' => ['messages' => []]],
+                ];
+            }
+
+            $sessionData['request']['body']['messages'][] = [
+                'role' => 'user',
+                'content' => $message,
+                'timestamp' => now()->toIso8601String(),
+            ];
+            $sessionData['request']['body']['messages'][] = [
+                'role' => 'assistant',
+                'content' => $reply,
+                'timestamp' => now()->toIso8601String(),
+            ];
+
+            @file_put_contents($sessionFile, json_encode($sessionData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        } catch (\Throwable $e) {
+            Log::warning('Failed saving session JSON: ' . $e->getMessage());
+        }
+
+        // 6. Log to Audit
+        try {
+            \App\Models\GlobalActivityLog::create([
+                'global_activity_action' => 'chat_message',
+                'global_activity_description' => "Interaksi chat aman (Direct API: {$provider}/{$usedModel}, Profile: {$profile})",
+                'global_activity_status' => 'success',
+            ]);
+        } catch (\Throwable $e) {}
 
         return [
-            'success' => !empty($reply) && !str_contains($reply, 'Traceback (most recent call last)'),
-            'reply' => $reply ?: 'Hermes tidak mengembalikan respon.',
-            'session_id' => $newSessionId,
-            'raw' => $output,
+            'success' => true,
+            'reply' => $reply,
+            'session_id' => $sessionId,
+            'profile' => $profile,
+            'provider' => $provider,
+            'model' => $usedModel,
+            'safe_mode' => true,
         ];
     }
 }

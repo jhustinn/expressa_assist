@@ -38,11 +38,68 @@ const searchQuery = ref('');
 const isPathInputOpen = ref(false);
 const manualPathInput = ref(props.currentPath);
 
-// File Preview Modal State
+// File Preview & Edit Modal State
 const previewModalOpen = ref(false);
 const previewLoading = ref(false);
 const previewData = ref(null);
 const copySuccess = ref(false);
+
+const isEditing = ref(false);
+const editableContent = ref('');
+const isSaving = ref(false);
+const saveSuccessMessage = ref('');
+const saveErrorMessage = ref('');
+
+// New Item (File/Folder) Modal State
+const newItemModalOpen = ref(false);
+const newItemType = ref('file');
+const newItemName = ref('');
+const newItemProcessing = ref(false);
+
+// Delete Item Confirmation Modal State
+const deleteModalOpen = ref(false);
+const deleteTarget = ref(null);
+const deleteProcessing = ref(false);
+
+const openNewItemModal = (type = 'file') => {
+    newItemType.value = type;
+    newItemName.value = '';
+    newItemModalOpen.value = true;
+};
+
+const submitNewItem = () => {
+    if (!newItemName.value.trim() || newItemProcessing.value) return;
+    newItemProcessing.value = true;
+    router.post('/api/files/create', {
+        parent_path: props.currentPath,
+        name: newItemName.value.trim(),
+        type: newItemType.value,
+    }, {
+        onFinish: () => {
+            newItemProcessing.value = false;
+            newItemModalOpen.value = false;
+        }
+    });
+};
+
+const confirmDelete = (item) => {
+    deleteTarget.value = item;
+    deleteModalOpen.value = true;
+};
+
+const executeDelete = () => {
+    if (!deleteTarget.value || deleteProcessing.value) return;
+    deleteProcessing.value = true;
+    router.post('/api/files/delete', {
+        path: deleteTarget.value.path,
+    }, {
+        onFinish: () => {
+            deleteProcessing.value = false;
+            deleteModalOpen.value = false;
+            deleteTarget.value = null;
+        }
+    });
+};
 
 const navigateTo = (path) => {
     if (!path) return;
@@ -71,18 +128,22 @@ const filteredFiles = computed(() => {
     return props.files.filter(f => f.name.toLowerCase().includes(q) || (f.extension && f.extension.toLowerCase().includes(q)));
 });
 
-// Open File Preview
-const openFilePreview = async (file) => {
+// Open File Preview / Editor
+const openFilePreview = async (file, startEdit = false) => {
     previewModalOpen.value = true;
     previewLoading.value = true;
     previewData.value = null;
     copySuccess.value = false;
+    isEditing.value = startEdit;
+    saveSuccessMessage.value = '';
+    saveErrorMessage.value = '';
 
     try {
         const res = await fetch(`/api/files/read?path=${encodeURIComponent(file.path)}`);
         const data = await res.json();
         if (res.ok && data.success) {
             previewData.value = data;
+            editableContent.value = data.content || '';
         } else {
             previewData.value = {
                 name: file.name,
@@ -100,6 +161,44 @@ const openFilePreview = async (file) => {
         };
     } finally {
         previewLoading.value = false;
+    }
+};
+
+const saveEditedFile = async () => {
+    if (!previewData.value?.path || isSaving.value) return;
+    isSaving.value = true;
+    saveSuccessMessage.value = '';
+    saveErrorMessage.value = '';
+
+    try {
+        const res = await fetch('/api/files/save', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+            },
+            body: JSON.stringify({
+                path: previewData.value.path,
+                content: editableContent.value,
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+            saveSuccessMessage.value = data.message;
+            previewData.value.content = editableContent.value;
+            previewData.value.size = data.size;
+            previewData.value.last_modified = data.last_modified;
+            setTimeout(() => {
+                saveSuccessMessage.value = '';
+            }, 3000);
+        } else {
+            saveErrorMessage.value = data.message || 'Gagal menyimpan berkas.';
+        }
+    } catch (e) {
+        saveErrorMessage.value = 'Terjadi kesalahan sistem saat menyimpan: ' + e.message;
+    } finally {
+        isSaving.value = false;
     }
 };
 
@@ -287,9 +386,9 @@ const getFileIcon = (ext) => {
                     </button>
                 </div>
 
-                <!-- Right: Search Filter Input & Refresh -->
-                <div class="flex items-center gap-2 shrink-0">
-                    <div class="relative w-full sm:w-56">
+                <!-- Right: Search Filter Input & Actions (New File, New Folder, Refresh) -->
+                <div class="flex items-center gap-2 flex-wrap shrink-0">
+                    <div class="relative w-full sm:w-48">
                         <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
                         <input
                             v-model="searchQuery"
@@ -299,9 +398,29 @@ const getFileIcon = (ext) => {
                         />
                     </div>
 
+                    <!-- New File Button -->
+                    <button
+                        @click="openNewItemModal('file')"
+                        class="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 hover:bg-emerald-500 text-emerald-600 dark:text-emerald-400 hover:text-white border border-emerald-500/20 transition flex items-center gap-1.5 cursor-pointer"
+                        title="Buat berkas baru di direktori ini"
+                    >
+                        <i class="fa-solid fa-file-circle-plus"></i>
+                        <span class="hidden sm:inline">File Baru</span>
+                    </button>
+
+                    <!-- New Folder Button -->
+                    <button
+                        @click="openNewItemModal('folder')"
+                        class="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-500/10 hover:bg-blue-500 text-blue-600 dark:text-blue-400 hover:text-white border border-blue-500/20 transition flex items-center gap-1.5 cursor-pointer"
+                        title="Buat folder baru di direktori ini"
+                    >
+                        <i class="fa-solid fa-folder-plus"></i>
+                        <span class="hidden sm:inline">Folder Baru</span>
+                    </button>
+
                     <button
                         @click="navigateTo(currentPath)"
-                        class="p-2 rounded-xl text-xs font-bold bg-gray-100 hover:bg-gray-200 dark:bg-[#151b2e] dark:hover:bg-slate-800 text-gray-700 dark:text-slate-300 border border-gray-200 dark:border-gray-700 transition"
+                        class="p-2 rounded-xl text-xs font-bold bg-gray-100 hover:bg-gray-200 dark:bg-[#151b2e] dark:hover:bg-slate-800 text-gray-700 dark:text-slate-300 border border-gray-200 dark:border-gray-700 transition cursor-pointer"
                         title="Muat ulang direktori saat ini"
                     >
                         <i class="fa-solid fa-rotate-right"></i>
@@ -367,12 +486,22 @@ const getFileIcon = (ext) => {
                                 <td class="py-2.5 px-4 text-gray-400 font-mono">-</td>
                                 <td class="py-2.5 px-4 text-gray-400 font-mono text-[11px]">{{ dir.last_modified }}</td>
                                 <td class="py-2.5 px-4 text-right">
-                                    <button
-                                        @click.stop="navigateTo(dir.path)"
-                                        class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-100 hover:bg-[#435ebe] hover:text-white dark:bg-slate-800 dark:hover:bg-[#435ebe] transition"
-                                    >
-                                        Buka
-                                    </button>
+                                    <div class="flex items-center justify-end gap-1.5">
+                                        <button
+                                            @click.stop="navigateTo(dir.path)"
+                                            class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-100 hover:bg-[#435ebe] hover:text-white dark:bg-slate-800 dark:hover:bg-[#435ebe] transition cursor-pointer"
+                                            title="Buka folder ini"
+                                        >
+                                            Buka
+                                        </button>
+                                        <button
+                                            @click.stop="confirmDelete(dir)"
+                                            class="p-1 rounded-lg text-gray-400 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
+                                            title="Hapus folder ini"
+                                        >
+                                            <i class="fa-solid fa-trash-can text-xs"></i>
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
 
@@ -401,15 +530,23 @@ const getFileIcon = (ext) => {
                                 <td class="py-2.5 px-4 text-gray-400 font-mono text-[11px]">{{ file.last_modified }}</td>
                                 <td class="py-2.5 px-4 text-right">
                                     <div class="flex items-center justify-end gap-1.5">
-                                        <!-- Preview Button for readable files -->
+                                        <!-- Edit / Preview Button -->
                                         <button
                                             v-if="file.is_editable"
-                                            @click="openFilePreview(file)"
-                                            class="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-[#435ebe]/10 hover:bg-[#435ebe] text-[#435ebe] hover:text-white dark:text-blue-400 dark:hover:text-white transition flex items-center gap-1 cursor-pointer"
-                                            title="Pratinjau konten berkas"
+                                            @click="openFilePreview(file, true)"
+                                            class="px-2 py-1 rounded-lg text-[11px] font-semibold bg-[#435ebe]/10 hover:bg-[#435ebe] text-[#435ebe] hover:text-white dark:text-blue-400 dark:hover:text-white transition flex items-center gap-1 cursor-pointer"
+                                            title="Edit berkas langsung di browser"
                                         >
-                                            <i class="fa-solid fa-eye text-[10px]"></i>
-                                            <span>Lihat</span>
+                                            <i class="fa-solid fa-pen text-[10px]"></i>
+                                            <span>Edit</span>
+                                        </button>
+                                        <button
+                                            v-if="file.is_editable"
+                                            @click="openFilePreview(file, false)"
+                                            class="p-1.5 rounded-lg text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                                            title="Lihat konten berkas"
+                                        >
+                                            <i class="fa-solid fa-eye text-xs"></i>
                                         </button>
 
                                         <!-- Download Button -->
@@ -420,6 +557,15 @@ const getFileIcon = (ext) => {
                                         >
                                             <i class="fa-solid fa-download text-xs"></i>
                                         </a>
+
+                                        <!-- Delete Button -->
+                                        <button
+                                            @click="confirmDelete(file)"
+                                            class="p-1.5 rounded-lg text-gray-400 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
+                                            title="Hapus berkas ini"
+                                        >
+                                            <i class="fa-solid fa-trash-can text-xs"></i>
+                                        </button>
                                     </div>
                                 </td>
                             </tr>
@@ -441,13 +587,13 @@ const getFileIcon = (ext) => {
         </div>
 
         <!-- ============================================================ -->
-        <!-- FILE PREVIEW MODAL                                           -->
+        <!-- FILE PREVIEW & LIVE CODE EDITOR MODAL                       -->
         <!-- ============================================================ -->
         <div
             v-if="previewModalOpen"
             class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
         >
-            <div class="w-full max-w-4xl max-h-[85vh] rounded-3xl bg-white dark:bg-[#111726] border border-gray-200 dark:border-[#1a2337] shadow-2xl flex flex-col overflow-hidden">
+            <div class="w-full max-w-4xl max-h-[88vh] rounded-3xl bg-white dark:bg-[#111726] border border-gray-200 dark:border-[#1a2337] shadow-2xl flex flex-col overflow-hidden">
                 <!-- Modal Header -->
                 <div class="p-4 sm:p-5 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between gap-4">
                     <div class="flex items-center gap-3 min-w-0">
@@ -455,8 +601,11 @@ const getFileIcon = (ext) => {
                             <i :class="[getFileIcon(previewData?.extension || '').icon, 'text-base']"></i>
                         </div>
                         <div class="min-w-0">
-                            <h3 class="font-bold text-sm text-gray-900 dark:text-white truncate font-mono">
-                                {{ previewData?.name || 'Memuat berkas...' }}
+                            <h3 class="font-bold text-sm text-gray-900 dark:text-white truncate font-mono flex items-center gap-2">
+                                <span>{{ previewData?.name || 'Memuat berkas...' }}</span>
+                                <span v-if="isEditing" class="px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-500 dark:text-amber-300 font-bold uppercase tracking-wider">
+                                    Mode Edit
+                                </span>
                             </h3>
                             <div class="text-[11px] text-gray-400 font-mono truncate">
                                 {{ previewData?.path }}
@@ -465,55 +614,238 @@ const getFileIcon = (ext) => {
                     </div>
 
                     <!-- Modal Actions -->
-                    <div class="flex items-center gap-2 shrink-0">
+                    <div class="flex items-center gap-2 shrink-0 flex-wrap">
+                        <!-- Mode Switcher: Preview vs Edit -->
+                        <button
+                            v-if="previewData && !previewData.is_error"
+                            @click="isEditing = !isEditing"
+                            :class="[
+                                'px-3 py-1.5 rounded-xl text-xs font-semibold border transition flex items-center gap-1.5 cursor-pointer',
+                                isEditing
+                                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-500 dark:text-amber-300 hover:bg-amber-500/20'
+                                    : 'bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 border-gray-300 dark:border-gray-700'
+                            ]"
+                        >
+                            <i :class="['fa-solid text-xs', isEditing ? 'fa-eye' : 'fa-pen']"></i>
+                            <span>{{ isEditing ? 'Mode Lihat' : 'Mode Edit' }}</span>
+                        </button>
+
+                        <!-- Save Button (Only in Edit Mode) -->
+                        <button
+                            v-if="isEditing && previewData && !previewData.is_error"
+                            @click="saveEditedFile"
+                            :disabled="isSaving"
+                            class="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+                        >
+                            <i :class="['fa-solid text-xs', isSaving ? 'fa-spinner fa-spin' : 'fa-floppy-disk']"></i>
+                            <span>{{ isSaving ? 'Menyimpan...' : 'Simpan' }}</span>
+                        </button>
+
+                        <!-- Copy Content Button -->
                         <button
                             v-if="previewData && !previewData.is_error"
                             @click="copyFileContent"
-                            class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 transition flex items-center gap-1.5"
+                            class="p-2 rounded-xl text-xs font-semibold bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 transition flex items-center gap-1.5 cursor-pointer"
                             title="Salin isi berkas"
                         >
                             <i :class="copySuccess ? 'fa-solid fa-check text-emerald-400' : 'fa-regular fa-copy'"></i>
-                            <span>{{ copySuccess ? 'Disalin' : 'Salin' }}</span>
                         </button>
 
+                        <!-- Download Button -->
                         <a
                             v-if="previewData?.path"
                             :href="`/api/files/download?path=${encodeURIComponent(previewData.path)}`"
-                            class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#435ebe] text-white hover:bg-[#354bb4] transition flex items-center gap-1.5"
+                            class="p-2 rounded-xl text-xs font-semibold bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200 transition flex items-center gap-1.5 cursor-pointer"
+                            title="Download berkas"
                         >
                             <i class="fa-solid fa-download"></i>
-                            <span class="hidden sm:inline">Download</span>
                         </a>
 
                         <button
                             @click="closeFilePreview"
-                            class="p-2 rounded-xl text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                            class="p-2 rounded-xl text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition cursor-pointer"
                         >
                             <i class="fa-solid fa-xmark text-base"></i>
                         </button>
                     </div>
                 </div>
 
-                <!-- Modal Content / Code Viewer -->
-                <div class="flex-1 p-4 overflow-y-auto bg-gray-50 dark:bg-[#0c101b] font-mono text-xs leading-relaxed select-text">
-                    <div v-if="previewLoading" class="py-16 text-center text-gray-400">
+                <!-- Toast Alerts for Save -->
+                <div v-if="saveSuccessMessage" class="px-5 py-2.5 bg-emerald-500/10 border-b border-emerald-500/20 text-emerald-600 dark:text-emerald-300 text-xs flex items-center gap-2">
+                    <i class="fa-solid fa-circle-check text-emerald-500"></i>
+                    <span>{{ saveSuccessMessage }}</span>
+                </div>
+                <div v-if="saveErrorMessage" class="px-5 py-2.5 bg-rose-500/10 border-b border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs flex items-center gap-2">
+                    <i class="fa-solid fa-circle-exclamation text-rose-500"></i>
+                    <span>{{ saveErrorMessage }}</span>
+                </div>
+
+                <!-- Modal Content / Code Viewer or Live Editor -->
+                <div class="flex-1 overflow-hidden flex flex-col bg-gray-50 dark:bg-[#0c101b] select-text">
+                    <div v-if="previewLoading" class="py-20 text-center text-gray-400">
                         <i class="fa-solid fa-spinner animate-spin text-2xl text-[#435ebe] mb-2"></i>
                         <p>Membaca konten berkas...</p>
                     </div>
 
-                    <div v-else-if="previewData?.is_error" class="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs">
+                    <div v-else-if="previewData?.is_error" class="p-6 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs m-4">
                         {{ previewData.content }}
                     </div>
 
-                    <div v-else class="whitespace-pre overflow-x-auto text-gray-800 dark:text-slate-200">
+                    <!-- Live Code Editor Mode -->
+                    <div v-else-if="isEditing" class="flex-1 flex flex-col h-full overflow-hidden p-3">
+                        <textarea
+                            v-model="editableContent"
+                            class="flex-1 w-full p-4 rounded-2xl bg-white dark:bg-[#090d16] border border-gray-200 dark:border-gray-800 text-gray-900 dark:text-slate-100 font-mono text-xs leading-relaxed focus:outline-none focus:border-[#435ebe] resize-none select-text"
+                            spellcheck="false"
+                            placeholder="Ketik isi berkas di sini..."
+                        ></textarea>
+                    </div>
+
+                    <!-- Read-only Code Preview Mode -->
+                    <div v-else class="flex-1 p-5 overflow-y-auto font-mono text-xs leading-relaxed text-gray-800 dark:text-slate-200 whitespace-pre overflow-x-auto">
                         {{ previewData?.content }}
                     </div>
                 </div>
 
                 <!-- Modal Footer -->
-                <div class="p-3 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111726] flex items-center justify-between text-[11px] text-gray-400 font-mono">
+                <div class="p-3.5 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111726] flex items-center justify-between text-[11px] text-gray-400 font-mono">
                     <span>Ukuran: {{ previewData?.size || '-' }}</span>
                     <span>Terakhir diubah: {{ previewData?.last_modified || '-' }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- NEW ITEM (FILE / FOLDER) MODAL                              -->
+        <!-- ============================================================ -->
+        <div
+            v-if="newItemModalOpen"
+            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+        >
+            <div class="w-full max-w-md rounded-3xl bg-white dark:bg-[#111726] border border-gray-200 dark:border-[#1a2337] shadow-2xl p-6 space-y-5">
+                <div class="flex items-center justify-between">
+                    <h3 class="font-extrabold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                        <i :class="['fa-solid text-[#435ebe]', newItemType === 'folder' ? 'fa-folder-plus' : 'fa-file-circle-plus']"></i>
+                        <span>{{ newItemType === 'folder' ? 'Buat Folder Baru' : 'Buat Berkas Baru' }}</span>
+                    </h3>
+                    <button @click="newItemModalOpen = false" class="text-gray-400 hover:text-white">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <div class="space-y-4 text-xs">
+                    <div>
+                        <label class="block font-bold text-gray-700 dark:text-gray-300 mb-1.5">Tipe Item</label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                @click="newItemType = 'file'"
+                                :class="[
+                                    'py-2 rounded-xl font-bold flex items-center justify-center gap-2 border transition',
+                                    newItemType === 'file'
+                                        ? 'bg-[#435ebe]/10 border-[#435ebe] text-[#435ebe] dark:text-blue-400'
+                                        : 'bg-gray-50 dark:bg-[#151b2e] border-gray-200 dark:border-gray-700 text-gray-500'
+                                ]"
+                            >
+                                <i class="fa-solid fa-file"></i>
+                                <span>Berkas / File</span>
+                            </button>
+                            <button
+                                type="button"
+                                @click="newItemType = 'folder'"
+                                :class="[
+                                    'py-2 rounded-xl font-bold flex items-center justify-center gap-2 border transition',
+                                    newItemType === 'folder'
+                                        ? 'bg-[#435ebe]/10 border-[#435ebe] text-[#435ebe] dark:text-blue-400'
+                                        : 'bg-gray-50 dark:bg-[#151b2e] border-gray-200 dark:border-gray-700 text-gray-500'
+                                ]"
+                            >
+                                <i class="fa-solid fa-folder"></i>
+                                <span>Direktori / Folder</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block font-bold text-gray-700 dark:text-gray-300 mb-1.5">Nama Item</label>
+                        <input
+                            v-model="newItemName"
+                            type="text"
+                            required
+                            :placeholder="newItemType === 'folder' ? 'misal: documents, modules' : 'misal: notes.md, config.json'"
+                            class="w-full px-3.5 py-2.5 rounded-xl bg-gray-50 dark:bg-[#151b2e] border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:border-[#435ebe]"
+                            autofocus
+                            @keydown.enter.prevent="submitNewItem"
+                        />
+                    </div>
+
+                    <div class="text-[11px] text-gray-400 font-mono">
+                        Lokasi: <span class="text-gray-300">{{ currentPath }}</span>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-end gap-2.5 pt-2">
+                    <button
+                        type="button"
+                        @click="newItemModalOpen = false"
+                        class="px-4 py-2 rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-800"
+                    >
+                        Batal
+                    </button>
+                    <button
+                        type="button"
+                        @click="submitNewItem"
+                        :disabled="newItemProcessing || !newItemName.trim()"
+                        class="px-4 py-2 rounded-xl text-xs font-bold bg-[#435ebe] hover:bg-[#354bb4] text-white transition disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                        <i v-if="newItemProcessing" class="fa-solid fa-spinner fa-spin"></i>
+                        <span>{{ newItemProcessing ? 'Membuat...' : 'Buat Item' }}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- DELETE CONFIRMATION MODAL                                    -->
+        <!-- ============================================================ -->
+        <div
+            v-if="deleteModalOpen"
+            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+        >
+            <div class="w-full max-w-sm rounded-3xl bg-white dark:bg-[#111726] border border-gray-200 dark:border-[#1a2337] shadow-2xl p-6 space-y-4">
+                <div class="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center text-xl mx-auto">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>
+
+                <div class="text-center space-y-1">
+                    <h3 class="font-bold text-sm text-gray-900 dark:text-white">
+                        Hapus {{ deleteTarget?.type === 'folder' ? 'Folder' : 'Berkas' }}?
+                    </h3>
+                    <p class="text-xs text-gray-400 break-all font-mono">
+                        {{ deleteTarget?.name }}
+                    </p>
+                    <p class="text-[11px] text-rose-400 pt-1">
+                        Tindakan ini tidak dapat dibatalkan. Item akan dihapus permanen dari sistem.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 pt-2">
+                    <button
+                        type="button"
+                        @click="deleteModalOpen = false"
+                        class="py-2.5 rounded-xl text-xs font-semibold bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200"
+                    >
+                        Batal
+                    </button>
+                    <button
+                        type="button"
+                        @click="executeDelete"
+                        :disabled="deleteProcessing"
+                        class="py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+                    >
+                        <i v-if="deleteProcessing" class="fa-solid fa-spinner fa-spin"></i>
+                        <span>{{ deleteProcessing ? 'Menghapus...' : 'Ya, Hapus' }}</span>
+                    </button>
                 </div>
             </div>
         </div>
