@@ -163,3 +163,8 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/api/pairing/revoke', [PairingController::class, 'revoke'])->name('pairing.revoke');
     });
 });
+
+// Fast lightweight public fallback for unhandled /api/* (prevents queue buildup on unknown routes)
+Route::any('/api/{any}', function () {
+    return response()->json(['success' => false, 'message' => 'API endpoint not handled by Expressa Control Center'], 404);
+})->where('any', '.*');
